@@ -1,0 +1,44 @@
+name: "HA-Sentinel Orchestrator"
+description: "Health monitor and Alexa endpoint for the HA-Sentinel AI system."
+version: "0.2.0"
+slug: "ha_sentinel_orchestrator"
+init: false
+arch:
+  - aarch64
+  - amd64
+homeassistant_api: true
+auth_api: true
+
+options:
+  ollama_url: "http://192.168.1.x:11434"
+  influxdb_url: "http://homeassistant.local:8086"
+  influxdb_token: ""
+  influxdb_org: ""
+  influxdb_bucket_metrics: "ha_sentinel_metrics"
+  telegram_bot_token: ""
+  telegram_admin_chat_id: 0
+  alexa_enabled: false
+  alexa_port: 8099
+  alexa_secret: ""
+  health_check_interval_seconds: 60
+  log_level: "INFO"
+
+schema:
+  ollama_url: str
+  influxdb_url: str
+  influxdb_token: str
+  influxdb_org: str
+  influxdb_bucket_metrics: str
+  telegram_bot_token: str
+  telegram_admin_chat_id: int
+  alexa_enabled: bool
+  alexa_port: int
+  alexa_secret: str
+  health_check_interval_seconds: int
+  log_level: list(DEBUG|INFO|WARNING|ERROR)
+
+ports:
+  8099/tcp: null
+
+ports_description:
+  8099/tcp: "Alexa HTTP Endpoint"

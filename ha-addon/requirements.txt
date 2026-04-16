@@ -1,0 +1,11 @@
+# Async HTTP (health checks + Ollama calls for Alexa)
+aiohttp==3.10.11
+
+# InfluxDB v2 async client (health metrics writer)
+influxdb-client[async]==1.46.0
+
+# Data validation
+pydantic==2.9.2
+
+# Structured JSON logging
+python-json-logger==2.0.7

@@ -1,0 +1,11 @@
+# Force LF for all files deployed to Linux systems
+* text=auto
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.json5 text eol=lf
+*.md    text eol=lf
+run.sh  text eol=lf

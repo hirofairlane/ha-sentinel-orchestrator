@@ -1,0 +1,34 @@
+// HA-Sentinel OpenClaw Configuration Template
+// Deploy to: ~/.openclaw/openclaw.json5
+// Fill {{PLACEHOLDERS}} with real values — NEVER commit filled values to git.
+{
+  models: {
+    providers: {
+      ollama: {
+        // Native Ollama API — do NOT add /v1 (breaks tool calling with Qwen 2.5)
+        baseUrl: "http://localhost:11434",
+        apiKey: "ollama-local",
+        api: "ollama",
+      },
+    },
+  },
+
+  agents: {
+    defaults: {
+      model: {
+        primary: "ollama/qwen2.5:14b",
+        fallback: "ollama/qwen2.5:7b",
+      },
+    },
+  },
+
+  gateway: {
+    channels: {
+      telegram: {
+        botToken: "{{TELEGRAM_BOT_TOKEN}}",
+        // Only these chat IDs can interact with the agent
+        allowedChatIds: [{{TELEGRAM_ALLOWED_CHAT_IDS}}],
+      },
+    },
+  },
+}
