@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-SENTINEL_REPO_URL="${SENTINEL_REPO_URL:-}"
+SENTINEL_REPO_URL="${SENTINEL_REPO_URL:-https://github.com/hirofairlane/ha-sentinel-orchestrator}"
 CONFIG_SRC="${1:-}"
 OPENCLAW_DIR="$HOME/.openclaw"
 
