@@ -29,13 +29,13 @@ done
 [[ -z "$AMD_RENDER" ]] && { echo "ERROR: No AMD GPU found in /sys/class/drm/"; exit 1; }
 
 # Get major:minor for the AMD renderD device
-RENDER_MAJOR=$(stat -c '%t' "$AMD_RENDER" | xargs printf '%d')   # hex → dec
-RENDER_MINOR=$(stat -c '%T' "$AMD_RENDER" | xargs printf '%d')
+RENDER_MAJOR=$(printf "%d" "0x$(stat -c "%t" "$AMD_RENDER")")   # hex → dec
+RENDER_MINOR=$(printf "%d" "0x$(stat -c "%T" "$AMD_RENDER")")
 
 # Get major:minor for /dev/kfd
 [[ ! -c /dev/kfd ]] && { echo "ERROR: /dev/kfd not found. Is amdgpu loaded on the host?"; exit 1; }
-KFD_MAJOR=$(stat -c '%t' /dev/kfd | xargs printf '%d')
-KFD_MINOR=$(stat -c '%T' /dev/kfd | xargs printf '%d')
+KFD_MAJOR=$(printf "%d" "0x$(stat -c "%t" /dev/kfd)")
+KFD_MINOR=$(printf "%d" "0x$(stat -c "%T" /dev/kfd)")
 
 echo "  AMD render node : $AMD_RENDER  ($RENDER_MAJOR:$RENDER_MINOR)"
 echo "  /dev/kfd        : ($KFD_MAJOR:$KFD_MINOR)"
