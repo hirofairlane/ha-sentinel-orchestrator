@@ -282,9 +282,9 @@ pct create 1XX local:vztmpl/debian-12-standard_12.x_amd64.tar.zst \
   --unprivileged 0   # privileged — required for ROCm /dev/kfd
 
 # Add GPU device passthrough to /etc/pve/lxc/1XX.conf:
-echo 'lxc.cgroup2.devices.allow: c 226:* rwm'   >> /etc/pve/lxc/1XX.conf
-echo 'lxc.cgroup2.devices.allow: c 235:0 rwm'   >> /etc/pve/lxc/1XX.conf
-echo 'lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir' \
+echo 'lxc.cgroup2.devices.allow: c 226:129 rwm'   >> /etc/pve/lxc/1XX.conf
+echo 'lxc.cgroup2.devices.allow: c 234:0 rwm'   >> /etc/pve/lxc/1XX.conf
+echo 'lxc.mount.entry: /dev/dri/renderD129 dev/dri/renderD129 none bind,optional,create=dir' \
                                                   >> /etc/pve/lxc/1XX.conf
 echo 'lxc.mount.entry: /dev/kfd dev/kfd none bind,optional,create=file' \
                                                   >> /etc/pve/lxc/1XX.conf

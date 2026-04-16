@@ -32,10 +32,10 @@ fi
 # ── 2. Verify GPU passthrough ───────────────────────────────────────────────
 echo "Checking GPU access..."
 if [[ ! -c /dev/kfd ]]; then
-  die "/dev/kfd not found.\n  Add to LXC config (/etc/pve/lxc/1XX.conf):\n  lxc.cgroup2.devices.allow: c 235:0 rwm\n  lxc.mount.entry: /dev/kfd dev/kfd none bind,optional,create=file\n  Then restart the LXC and re-run this script."
+  die "/dev/kfd not found.\n  Add to LXC config (/etc/pve/lxc/1XX.conf):\n  lxc.cgroup2.devices.allow: c 234:0 rwm\n  lxc.mount.entry: /dev/kfd dev/kfd none bind,optional,create=file\n  Then restart the LXC and re-run this script."
 fi
-if [[ ! -d /dev/dri ]]; then
-  die "/dev/dri not found.\n  Add to LXC config:\n  lxc.cgroup2.devices.allow: c 226:* rwm\n  lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir"
+if [[ ! -c /dev/dri/renderD129 ]]; then
+  die "/dev/dri/renderD129 (AMD RX 7900 GRE) not found.\n  Add to LXC config:\n  lxc.cgroup2.devices.allow: c 226:129 rwm\n  lxc.mount.entry: /dev/dri/renderD129 dev/dri/renderD129 none bind,optional,create=file"
 fi
 ok "/dev/kfd and /dev/dri present — ROCm passthrough OK"
 
