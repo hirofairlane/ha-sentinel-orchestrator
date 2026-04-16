@@ -11,6 +11,7 @@
 # Set SENTINEL_REPO_URL before running, or pass the config dir as $1.
 
 set -euo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
 
 SENTINEL_REPO_URL="${SENTINEL_REPO_URL:-https://github.com/hirofairlane/ha-sentinel-orchestrator}"
 CONFIG_SRC="${1:-}"
