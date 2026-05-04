@@ -1,0 +1,9 @@
+# Jarvis AI system maintenance — instalar en /etc/cron.d/ha-jarvis (LXC 104)
+SHELL=/bin/bash
+
+# Actualiza entidades de Home Assistant en el contexto de Jarvis (cada 8h)
+# set -a exporta las vars del env file al subproceso ha-refresh-entities
+0 */8 * * * root set -a; . /root/.openclaw/gateway.systemd.env; set +a; ha-refresh-entities >> /var/log/ha-refresh-entities.log 2>&1
+
+# Rota logs (evitar que crezcan infinito)
+0 4 * * 0 root truncate -s 0 /var/log/ha-refresh-entities.log
