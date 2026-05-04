@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""ha - Home Assistant CLI for Jarvis"""
+import sys, os, json, subprocess
+from datetime import datetime, timezone, timedelta
+
+if not (os.environ.get('HA_URL') and os.environ.get('HA_TOKEN')):
+    _envfile = '/root/.openclaw/gateway.systemd.env'
+    if os.path.exists(_envfile):
+        with open(_envfile) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith('#') or '=' not in _line:
+                    continue
+                _k, _v = _line.split('=', 1)
+                _v = _v.strip().strip('"').strip("'")
+                os.environ.setdefault(_k.strip(), _v)
+
+try:
+    HA_URL = os.environ['HA_URL']
+    HA_TOKEN = os.environ['HA_TOKEN']
+except KeyError as _e:
+    sys.exit(f'ha: missing env var {_e}; populate /root/.openclaw/gateway.systemd.env')
+
+def _get(path):
+    r = subprocess.run(
+        ['curl','-sf',f'{HA_URL}{path}','-H',f'Authorization: Bearer {HA_TOKEN}'],
+        capture_output=True, text=True)
+    return json.loads(r.stdout)
+
+def _post(path, payload):
+    subprocess.run(
+        ['curl','-sf','-X','POST',f'{HA_URL}{path}',
+         '-H',f'Authorization: Bearer {HA_TOKEN}',
+         '-H','Content-Type: application/json',
+         '-d',json.dumps(payload)],
+        capture_output=True)
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else ''
+
+if cmd == 'lights':
+    data = _get('/api/states')
+    on  = [x['entity_id'] for x in data if x['entity_id'].startswith('light.') and x['state']=='on']
+    off = [x['entity_id'] for x in data if x['entity_id'].startswith('light.') and x['state']=='off']
+    print(f'Encendidas ({len(on)}):'); [print(' •',l) for l in on]
+    print(f'Apagadas ({len(off)}):');  [print(' •',l) for l in off]
+
+elif cmd == 'search':
+    term = sys.argv[2].lower()
+    data = _get('/api/states')
+    for x in data:
+        fn = str(x.get('attributes',{}).get('friendly_name',''))
+        if term in x['entity_id'].lower() or term in fn.lower():
+            print(x['entity_id'],'=',x['state'],'|',fn)
+
+elif cmd == 'state':
+    entity = sys.argv[2]
+    data = _get(f'/api/states/{entity}')
+    state = data.get('state','unknown')
+    fn = data.get('attributes',{}).get('friendly_name','')
+    lu = data.get('last_updated','')[:16].replace('T',' ')
+    unit = data.get('attributes',{}).get('unit_of_measurement','')
+    print(f'{entity}: {state} {unit} | {fn} | last updated {lu}')
+
+elif cmd == 'history':
+    entity = sys.argv[2]
+    hours = int(sys.argv[3]) if len(sys.argv) > 3 else 24
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
+    data = _get(f'/api/history/period/{start}?filter_entity_id={entity}&significant_changes_only=true')
+    if not data or not data[0]:
+        print(f'Sin historial para {entity} en las últimas {hours}h')
+    else:
+        entries = data[0][-20:]  # últimas 20 entradas
+        print(f'Historial {entity} (últimas {hours}h, {len(data[0])} cambios):')
+        for e in entries:
+            t = e.get('last_updated','')[:16].replace('T',' ')
+            unit = e.get('attributes',{}).get('unit_of_measurement','')
+            print(f'  {t}  {e["state"]} {unit}')
+
+elif cmd == 'on':
+    entity = sys.argv[2]
+    extras = {}
+    for arg in sys.argv[3:]:
+        k,v = arg.split('=',1); extras[k] = int(v) if v.isdigit() else v
+    _post('/api/services/light/turn_on', {'entity_id': entity, **extras})
+    print(entity, '→ encendida')
+
+elif cmd == 'off':
+    entity = sys.argv[2]
+    _post('/api/services/light/turn_off', {'entity_id': entity})
+    print(entity, '→ apagada')
+
+elif cmd == 'call':
+    service = sys.argv[2]; entity = sys.argv[3]
+    extras = {}
+    for arg in sys.argv[4:]:
+        k,v = arg.split('=',1); extras[k] = int(v) if v.isdigit() else v
+    domain, svc = service.split('.')
+    _post(f'/api/services/{domain}/{svc}', {'entity_id': entity, **extras})
+    print(entity, '→ OK')
+
+elif cmd == 'states':
+    domain = sys.argv[2] if len(sys.argv) > 2 else None
+    data = _get('/api/states')
+    for x in data:
+        if not domain or x['entity_id'].startswith(f'{domain}.'):
+            unit = x.get('attributes',{}).get('unit_of_measurement','')
+            print(x['entity_id'],'=',x['state'],unit)
+
+elif cmd == 'cameras':
+    data = _get('/api/states')
+    skip = ['_bird','_cat','_dog','_mouse','_car','_lowres','_hires','_mainstream',
+            '_lite_mainstream','_mainstream_2','_mainstream_3','_mainstream_4']
+    for x in data:
+        if (x['entity_id'].startswith('camera.') and x['state'] in ('recording','idle')
+                and not any(x['entity_id'].endswith(s) for s in skip)):
+            print(x['entity_id'],'=',x['state'])
+
+elif cmd == 'photo':
+    TG_TOKEN = os.environ['TG_TOKEN']; TG_CHAT_ID = os.environ['TG_CHAT_ID']
+    entities = sys.argv[2:]
+    if not entities:
+        data = _get('/api/states')
+        skip = ['_bird','_cat','_dog','_mouse','_car','_lowres','_hires','_mainstream',
+                '_lite_mainstream','_mainstream_2','_mainstream_3','_mainstream_4']
+        entities = [x['entity_id'] for x in data if x['entity_id'].startswith('camera.')
+                    and x['state']=='recording'
+                    and not any(x['entity_id'].endswith(s) for s in skip)]
+    for c in entities:
+        subprocess.run(['curl','-sf',f'{HA_URL}/api/camera_proxy/{c}',
+                        '-H',f'Authorization: Bearer {HA_TOKEN}','-o','/tmp/cam.jpg'],
+                       capture_output=True)
+        r = subprocess.run(['curl','-sf','-X','POST',
+                            f'https://api.telegram.org/bot{TG_TOKEN}/sendPhoto',
+                            '-F',f'chat_id={TG_CHAT_ID}','-F','photo=@/tmp/cam.jpg',
+                            '-F',f'caption={c}'],
+                           capture_output=True, text=True)
+        try: ok = json.loads(r.stdout).get('ok')
+        except: ok = False
+        print(c,'→','OK' if ok else 'error')
+
+else:
+    print('Comandos: lights | search <term> | state <entity> | history <entity> [horas] | on <entity> [k=v] | off <entity> | call <svc> <entity> | states [domain] | cameras | photo [entities]')
