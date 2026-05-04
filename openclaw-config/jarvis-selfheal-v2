@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""
+jarvis-selfheal v2 — daemon local en LXC 104.
+Vigila el journal de openclaw en tiempo real y detecta fallos funcionales
+que el sentinel externo (plex) no puede ver: health OK pero respuestas vacías.
+
+Cambios v2:
+  - Umbral por patrón: empty_response y process_conflict actúan en el 1er fallo
+  - Al recuperar de empty_response: borra sesión activa corrupta
+  - Telegram avisa al usuario para que reintente su petición
+  - Escalado automático LVL1->LVL2 si el gateway no se recupera
+
+Fallos detectados:
+  payloads=0              -> respuesta vacía del modelo   -> THRESH=1, LVL1
+  already running         -> conflicto de proceso         -> THRESH=1, LVL1
+  ECONNREFUSED ollama     -> Ollama caído                 -> THRESH=2, LVL2
+  GPU OOM / CUDA error    -> fallo VRAM                   -> THRESH=1, LVL2
+
+Cooldown: 300 s entre repairs.
+"""
+import re, subprocess, time, json, urllib.request, glob
+from pathlib import Path
+from datetime import datetime
+from collections import deque
+
+ENV_FILE     = Path("/root/.jarvis-sentinel.env")
+LOG_FILE     = Path("/var/log/jarvis-selfheal.log")
+SESSION_DIR  = Path("/root/.openclaw/agents/main/sessions")
+
+FAIL_WINDOW  = 180
+COOLDOWN     = 300
+HEALTH_URL   = "http://127.0.0.1:18789/health"
+
+TG_BOT_TOKEN = None
+TG_CHAT_ID   = None
+
+# (regex, name, level, threshold)
+PATTERNS = [
+    (re.compile(r"payloads=0"),
+     "empty_response",   1, 1),
+    (re.compile(r"already running under systemd"),
+     "process_conflict", 1, 1),
+    (re.compile(r"ECONNREFUSED.*1143[34]|connect.*1143[34].*refused|ollama.*connection refused", re.I),
+     "ollama_down",      2, 2),
+    (re.compile(r"out of memory|failed to allocate|CUDA error|ROCm error|gpu.*oom", re.I),
+     "gpu_oom",          2, 1),
+]
+
+
+def load_env():
+    global TG_BOT_TOKEN, TG_CHAT_ID
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            if line.startswith("TG_BOT_TOKEN="):
+                TG_BOT_TOKEN = line.split("=", 1)[1].strip()
+            elif line.startswith("TG_CHAT_ID="):
+                TG_CHAT_ID = line.split("=", 1)[1].strip()
+
+
+def log(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    try:
+        with LOG_FILE.open("a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def send_telegram(msg):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        return
+    payload = json.dumps({"chat_id": TG_CHAT_ID, "text": msg}).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        log(f"[warn] Telegram: {e}")
+
+
+def gateway_ok():
+    try:
+        r = urllib.request.urlopen(HEALTH_URL, timeout=8)
+        return json.loads(r.read()).get("ok") is True
+    except Exception:
+        return False
+
+
+def clear_active_sessions():
+    """Borra la sesión activa más reciente para forzar sesión limpia."""
+    if not SESSION_DIR.exists():
+        return
+    sessions = sorted(SESSION_DIR.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    cleared = 0
+    for s in sessions[:3]:
+        try:
+            s.unlink()
+            log(f"[selfheal] sesión borrada: {s.name}")
+            cleared += 1
+        except Exception as e:
+            log(f"[warn] no se pudo borrar {s.name}: {e}")
+    return cleared
+
+
+def do_repair(level, reason, last_repair, was_empty_response=False):
+    now = time.time()
+    if now - last_repair < COOLDOWN:
+        log(f"[selfheal] cooldown activo ({int(COOLDOWN-(now-last_repair))}s restantes)")
+        return last_repair
+
+    log(f"[selfheal] REPAIR nivel={level} causa={reason}")
+
+    if was_empty_response:
+        log("[selfheal] Borrando sesiones activas...")
+        n = clear_active_sessions()
+        if n:
+            log(f"[selfheal] {n} sesión(es) borradas")
+
+    if level >= 2:
+        send_telegram(f"Selfheal LVL{level}: {reason} — reiniciando Ollama+OpenClaw")
+        log("Reiniciando ollama...")
+        subprocess.run(["systemctl", "restart", "ollama"], capture_output=True, timeout=60)
+        time.sleep(15)
+    else:
+        send_telegram(f"Selfheal LVL1: {reason} — reiniciando OpenClaw")
+
+    log("Reiniciando openclaw...")
+    subprocess.run(["systemctl", "restart", "openclaw"], capture_output=True, timeout=60)
+    time.sleep(10)
+
+    if gateway_ok():
+        log("[selfheal] Recuperado OK")
+        if was_empty_response:
+            send_telegram(
+                "Jarvis se ha autocorregido. "
+                "Por favor, reenvía tu última petición."
+            )
+        else:
+            send_telegram("Selfheal: Jarvis recuperado")
+        return now
+
+    if level < 2:
+        log("[selfheal] Escalando a LVL2...")
+        send_telegram("Selfheal escalando a LVL2 (OpenClaw no respondió)")
+        subprocess.run(["systemctl", "restart", "ollama"], capture_output=True, timeout=60)
+        time.sleep(15)
+        subprocess.run(["systemctl", "restart", "openclaw"], capture_output=True, timeout=60)
+        time.sleep(10)
+        if gateway_ok():
+            log("[selfheal] Recuperado LVL2 OK")
+            if was_empty_response:
+                send_telegram(
+                    "Jarvis se ha autocorregido (LVL2). "
+                    "Por favor, reenvía tu última petición."
+                )
+            else:
+                send_telegram("Selfheal LVL2: Jarvis recuperado")
+            return now
+
+    log("[selfheal] AGOTADO — intervención manual necesaria")
+    send_telegram(
+        "Selfheal agotado. Intervención manual necesaria en LXC 104.\n"
+        "Comprueba: systemctl status openclaw ollama"
+    )
+    return now
+
+
+def main():
+    load_env()
+    log("jarvis-selfheal v2 arrancado")
+    Path("/var/lib/jarvis").mkdir(parents=True, exist_ok=True)
+
+    recent = deque()
+    last_repair = 0.0
+
+    proc = subprocess.Popen(
+        ["journalctl", "-f", "-u", "openclaw", "-o", "cat", "--no-pager"],
+        stdout=subprocess.PIPE, text=True, bufsize=1)
+
+    try:
+        for raw in proc.stdout:
+            line = raw.strip()
+            if not line:
+                continue
+            now = time.time()
+
+            while recent and now - recent[0][0] > FAIL_WINDOW:
+                recent.popleft()
+
+            matched = None
+            for pattern, name, level, thresh in PATTERNS:
+                if pattern.search(line):
+                    matched = (name, level, thresh)
+                    recent.append((now, name, level, thresh))
+                    log(f"[detect] {name}: {line[:100]}")
+                    break
+
+            if not matched:
+                continue
+
+            counts = {}
+            for _, nm, lv, th in recent:
+                entry = counts.get(nm, (0, lv, th))
+                counts[nm] = (entry[0] + 1, lv, th)
+
+            for nm, (count, lv, th) in counts.items():
+                if count >= th:
+                    reason = f"{nm} x{count} en {FAIL_WINDOW}s"
+                    recent.clear()
+                    last_repair = do_repair(
+                        lv, reason, last_repair,
+                        was_empty_response=(nm == "empty_response")
+                    )
+                    break
+
+    except Exception as e:
+        log(f"[error] loop: {e}")
+    finally:
+        proc.terminate()
+
+
+if __name__ == "__main__":
+    main()

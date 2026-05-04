@@ -1,0 +1,16 @@
+[Unit]
+Description=Jarvis Tool-Call Watcher — detecta sesiones donde el modelo emite tool_calls falsos sin ejecutar
+After=openclaw.service
+Wants=openclaw.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/jarvis-tool-call-watcher
+Restart=on-failure
+RestartSec=10
+Nice=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
