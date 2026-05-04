@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+import subprocess, sys
+
+HOSTS = {
+    "zeratul": {"host": "192.168.1.122", "user": "root"},
+    "plex":    {"host": "192.168.1.123", "user": "sergio"},
+    "crafty":  {"host": "192.168.1.36",  "user": "root"},
+    "frigate": {"host": "192.168.1.170", "user": "sergio"},
+    "h340":    {"host": "192.168.1.129", "user": "root"},
+}
+
+PRESETS = {
+    "df":      "df -h --output=source,size,used,avail,pcent | grep -v tmpfs | grep -v udev",
+    "mem":     "free -h",
+    "top5":    "ps aux --sort=-%cpu | head -6",
+    "temp":    "cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | while read t; do echo $((t/1000))C; done; sensors 2>/dev/null | grep -E 'Core|temp' || true",
+    "updates": "apt list --upgradable 2>/dev/null | grep -c upgradable 2>/dev/null || echo 0",
+    "uptime":  "uptime",
+    "status":  "uptime && free -h | grep Mem && df -h / | tail -1",
+}
+
+SSH_KEY = "/root/.ssh/id_infra"
+SSH_OPTS = ["-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=8"]
+
+def run_on(name, cmd):
+    if name not in HOSTS:
+        return f"ERROR: host desconocido: {name}"
+    h = HOSTS[name]
+    target = f"{h['user']}@{h['host']}"
+    result = subprocess.run(
+        ["ssh"] + SSH_OPTS + [target, cmd],
+        capture_output=True, text=True, timeout=30
+    )
+    out = result.stdout.strip()
+    err = result.stderr.strip()
+    if result.returncode != 0 and not out:
+        return f"ERROR (rc={result.returncode}): {err}"
+    return out
+
+def usage():
+    hosts = ", ".join(HOSTS.keys())
+    presets = ", ".join(PRESETS.keys())
+    print(f"srv - SSH wrapper Jarvis\n\nUso: srv <host|all> <preset|--cmd>\nHosts: {hosts}\nPresets: {presets}")
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        usage(); return
+    target = args[0]
+    if len(args) < 2:
+        usage(); return
+    if "--" in args:
+        sep = args.index("--")
+        cmd = " ".join(args[sep+1:])
+    else:
+        cmd = PRESETS.get(args[1], args[1])
+    targets = list(HOSTS.keys()) if target == "all" else [target]
+    for name in targets:
+        if len(targets) > 1:
+            print(f"\n=== {name} ===")
+        print(run_on(name, cmd))
+
+if __name__ == "__main__":
+    main()
