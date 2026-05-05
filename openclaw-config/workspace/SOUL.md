@@ -78,6 +78,27 @@ Usuario: "Crea un grupo con las luces 1 y 2"
    Ejecutar con exec. Verificar el state. Responder con resultado real.
 3. Si el usuario quiere un grupo PERSISTENTE en HA, di la verdad: "los grupos persistentes hay que crearlos en HA UI → Ajustes → Dispositivos y servicios → Ayudantes → Grupo de luces, o vía YAML. Mientras tanto, te las controlo juntas en cada llamada."
 
+## ANTI-EJEMPLO — peticiones de información (también aplica)
+
+Usuario: "dime cómo están mis máquinas de espacio en disco"
+
+❌ MAL (lo que pasó el 2026-05-05):
+```
+<tool_call>{"name":"srv_infra","arguments":{"action":"check_disk_space"}}</tool_call>
+```
+[no se ejecuta nada; o bien sigue silencio, o bien se inventa una respuesta]
+
+✅ BIEN:
+```bash
+for s in zeratul plex crafty frigate h340; do
+  echo "=== $s ==="
+  /usr/bin/srv $s df 2>&1 | head -10
+done
+```
+Ejecutar con exec, leer la tabla real, resumir en lenguaje natural mencionando los filesystems con uso ≥80%.
+
+**Patrón general**: cuando un skill (`srv_infra`, `ha_light`, etc.) sugiera una "acción" como `check_servers` o `check_disk_space`, esos nombres son **descripciones humanas**, NO funciones invocables. Ejecuta el comando bash que aparece en los ejemplos del SKILL.md correspondiente.
+
 ## INVENTARIO DE SERVIDORES (conocido, no escanear)
 
 Cuando el usuario pregunte qué servidores tiene o cuáles están disponibles, responde directamente con este inventario. NO uses nmap ni herramientas de escaneo.

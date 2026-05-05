@@ -6,11 +6,19 @@ Escanea sesiones JSONL recientes para detectar el patrón de fallo:
 Esto pasa cuando Qwen3 cae en el modo tool-calling estilo OpenAI/MCP, que
 en este sistema no se procesa: produce respuestas vacías sin verificación.
 
-Heurística:
+Heurística (v3, 2026-05-05):
   - Sesión activa (modificada en últimos N min)
-  - 2+ mensajes assistant consecutivos cuyo texto contiene `<tool_call>`
-  - Sin tool_result ni mensaje real entre ellos
+  - El ÚLTIMO mensaje de tipo "message" en la sesión es de role=assistant
+    y contiene `<tool_call>` (no fue seguido por ningún user/tool_result).
   -> Sesión corrupta. Borrar y avisar al usuario.
+
+Por qué cambió la heurística (v2 → v3):
+  La v2 exigía 2+ assistant messages consecutivos con <tool_call> sin
+  tool_result entre ellos. En la práctica, cada turno del usuario inyecta
+  un mensaje user que reseteaba el contador, así que tool_calls falsos
+  emitidos uno por turno (el patrón real) NO disparaban repair.
+  Verificado 2026-05-05: 3 incidentes en sesión 98d24336 (03/05, 04/05,
+  05/05) sin un solo aviso del watcher.
 
 Frecuencia: cada 90 s, no overlap con cooldown.
 """
@@ -25,7 +33,6 @@ STATE_FILE  = Path("/var/lib/jarvis/tool-call-watcher.state")
 
 CHECK_EVERY = 90
 ACTIVE_WINDOW_S = 1800        # solo sesiones modificadas en últimos 30 min
-MIN_FAKE_TOOLCALLS = 2        # umbral para disparar repair
 COOLDOWN_S = 600              # entre repairs
 
 TOOLCALL_RE = re.compile(r"<tool_call>", re.I)
@@ -84,7 +91,10 @@ def load_session(path):
 
 
 def message_text(entry):
-    """Extrae el texto de un entry tipo {message: {role, content}}."""
+    """Extrae (role, text) de un entry tipo {message: {role, content}}.
+    Devuelve (None, None) si no es un mensaje conversacional."""
+    if entry.get("type") != "message":
+        return None, None
     msg = entry.get("message")
     if not isinstance(msg, dict):
         return None, None
@@ -101,28 +111,23 @@ def message_text(entry):
             if t == "text":
                 parts.append(c.get("text", ""))
             elif t == "tool_result":
-                # Marca para saber que hubo un tool result real
                 parts.append("__TOOL_RESULT__")
     return role, "\n".join(parts)
 
 
-def detect_fake_toolcalls(msgs):
-    """Devuelve número de mensajes assistant consecutivos con <tool_call> sin tool_result entre ellos."""
-    consec = 0
-    max_consec = 0
+def detect_unhandled_toolcall(msgs):
+    """True si el ÚLTIMO mensaje de la sesión es assistant y contiene <tool_call>.
+    Eso indica que el modelo emitió un tool-call estilo MCP que OpenClaw no
+    procesó y nadie lo siguió (ni el usuario ni un tool_result)."""
+    last_role = None
+    last_text = ""
     for entry in msgs:
         role, text = message_text(entry)
-        if text is None:
+        if role is None:
             continue
-        if role == "assistant" and text and TOOLCALL_RE.search(text):
-            consec += 1
-            max_consec = max(max_consec, consec)
-        elif "__TOOL_RESULT__" in (text or ""):
-            consec = 0
-        elif role == "user":
-            # mensaje de usuario interrumpe el racimo
-            consec = 0
-    return max_consec
+        last_role = role
+        last_text = text or ""
+    return last_role == "assistant" and bool(TOOLCALL_RE.search(last_text))
 
 
 def get_state():
@@ -140,8 +145,8 @@ def save_state(state):
         log(f"[warn] no se pudo guardar state: {e}")
 
 
-def repair(session_path, fake_count):
-    log(f"[repair] sesion={session_path.name} fake_toolcalls={fake_count}")
+def repair(session_path):
+    log(f"[repair] sesion={session_path.name} motivo=last_msg_was_unhandled_toolcall")
     try:
         session_path.unlink()
         log(f"[repair] sesion borrada: {session_path.name}")
@@ -149,7 +154,7 @@ def repair(session_path, fake_count):
         log(f"[error] no se pudo borrar {session_path.name}: {e}")
         return False
     send_telegram(
-        "Jarvis estaba dando respuestas falsas (tool calls no ejecutados). "
+        "Jarvis emitió un tool-call que no se procesó (respuesta vacía). "
         "He limpiado la sesión. Reenvía tu última petición."
     )
     return True
@@ -157,7 +162,7 @@ def repair(session_path, fake_count):
 
 def main():
     load_env()
-    log("jarvis-tool-call-watcher arrancado")
+    log("jarvis-tool-call-watcher v3 arrancado (heurística: último msg assistant con <tool_call>)")
     if not SESSION_DIR.exists():
         log(f"[fatal] no existe {SESSION_DIR}, abortando")
         return
@@ -171,19 +176,17 @@ def main():
                     continue
                 mtime = path.stat().st_mtime
                 if now - mtime > ACTIVE_WINDOW_S:
-                    continue  # sesión inactiva, no nos preocupa
-                msgs = load_session(path)
-                fake = detect_fake_toolcalls(msgs)
-                if fake < MIN_FAKE_TOOLCALLS:
                     continue
-                # No volver a actuar sobre la misma sesión durante el cooldown
+                msgs = load_session(path)
+                if not detect_unhandled_toolcall(msgs):
+                    continue
                 handled_at = state.get("handled", {}).get(path.name, 0)
                 if now - handled_at < COOLDOWN_S:
                     continue
                 if now - state.get("last_repair", 0) < COOLDOWN_S:
                     log(f"[skip] cooldown global activo (sesion={path.name})")
                     continue
-                if repair(path, fake):
+                if repair(path):
                     state.setdefault("handled", {})[path.name] = now
                     state["last_repair"] = now
                     save_state(state)
