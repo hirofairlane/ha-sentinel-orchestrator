@@ -5,11 +5,10 @@ or local bridge, forwards it to Ollama, and returns a plain-text response.
 
 from __future__ import annotations
 
-import json
 import logging
-from aiohttp import web
 
 import aiohttp
+from aiohttp import web
 
 log = logging.getLogger(__name__)
 

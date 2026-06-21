@@ -9,12 +9,10 @@ import asyncio
 import logging
 import os
 import time
-from typing import Optional
 
 import aiohttp
-from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
-from influxdb_client.client.write_api import ASYNCHRONOUS
 from influxdb_client import Point
+from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 
 log = logging.getLogger(__name__)
 

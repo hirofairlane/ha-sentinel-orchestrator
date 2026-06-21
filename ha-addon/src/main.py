@@ -7,9 +7,9 @@ import asyncio
 import logging
 
 from config import load_config
-from utils import setup_logging
-from observability import HealthChecker
 from interfaces import AlexaEndpoint
+from observability import HealthChecker
+from utils import setup_logging
 
 
 async def main() -> None:
