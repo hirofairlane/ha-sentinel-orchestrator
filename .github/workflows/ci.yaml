@@ -49,9 +49,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build add-on image (amd64)
+        # The HA python base image is tagged "<py>-alpine<ver>"; the bare
+        # ":3.12" tag does not exist. Pin a valid amd64 base for the CI build
+        # (the real HA builder injects BUILD_FROM from build.yaml at install).
         run: |
           docker build \
-            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12 \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.21 \
             -t ha-sentinel:ci ha-addon
 
   # ── Official Home Assistant add-on config linter (advisory: this 3rd-party
